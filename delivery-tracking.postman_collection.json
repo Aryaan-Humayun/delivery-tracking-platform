@@ -1,0 +1,646 @@
+{
+  "info": {
+    "_postman_id": "3e816985-3760-472b-b124-8fab079a937d",
+    "name": "Delivery Tracking Platform API",
+    "description": "Real-time delivery tracking backend - REST API. Covers auth (register/login/logout), driver management, and order lifecycle management.\n\nAuth: most routes require a JWT. Log in with the \"Login\" request first - its test script automatically saves the returned token into the `{{token}}` collection variable, which every protected request in this collection uses automatically via collection-level Bearer auth (you do not need to copy/paste it anywhere).\n\nRoles: `customer`, `driver`, `dispatcher` - many endpoints behave differently (or are restricted) depending on the role of the logged-in user. Each request description below states who can call it.\n\nFolder order matters if you use \"Run collection\": Auth -> Drivers -> Orders -> Health -> Logout. Logout is last on purpose, in its own spot, because it revokes {{token}} - if it ran any earlier, everything after it would 401 from that alone, not from anything wrong with the API.\n\nRelated docs in the project: SCHEMA.md (database design), SOCKETS.md (Socket.IO events - not part of this REST collection), and the live interactive API docs at `{{baseUrl}}/api-docs`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "driverId",
+      "value": "1",
+      "type": "string",
+      "description": "A drivers.id to use in path parameters below - adjust after creating/listing drivers."
+    },
+    {
+      "key": "orderId",
+      "value": "1",
+      "type": "string",
+      "description": "An orders.id to use in path parameters below - adjust after creating/listing orders."
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "description": "Registration and login. Register and Login are public (no token required). Logout lives at the very end of this collection, not here - see its own description for why.",
+      "item": [
+        {
+          "name": "Register (Customer)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Creates a customer account. Public - no token required. Subject to a strict rate limit (5 requests / 15 min / IP by default) to slow down spam signups. Returns 201 with the created user on success, 400 for invalid fields, 409 if the email is already registered.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Alice Customer\",\n  \"email\": \"alice@example.com\",\n  \"password\": \"abc12345\",\n  \"role\": \"customer\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Register (Driver)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Creates a driver account. Public - no token required. Because role is \"driver\", `phone` and `vehicleType` are required, and a linked row in the drivers table is created in the same DB transaction as the user (status defaults to \"offline\") - both succeed or neither does. Returns 201 with both `user` and `driver` on success.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Dan Driver\",\n  \"email\": \"dan@example.com\",\n  \"password\": \"abc12345\",\n  \"role\": \"driver\",\n  \"phone\": \"555-1234\",\n  \"vehicleType\": \"bike\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Register (Dispatcher)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Creates a dispatcher account. Public - no token required. Dispatchers can manage all drivers and orders (assign drivers, view everything, deactivate drivers, delete not-yet-assigned orders) - this is the most privileged role in the system.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Dispatch Dave\",\n  \"email\": \"dave@example.com\",\n  \"password\": \"abc12345\",\n  \"role\": \"dispatcher\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Verifies credentials against the stored bcrypt hash and returns a JWT (24h expiry by default). Public - no token required to call this, but the response token is what every other protected request in this collection uses. Same generic 401 message whether the email does not exist or the password is wrong (avoids leaking which one was incorrect). Subject to the same strict rate limit as registration.\n\nThis request's Tests tab automatically saves `token` from the response into the `{{token}}` collection variable - run this once after switching which user you want to act as, and every other request in the collection will use that token automatically.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alice@example.com\",\n  \"password\": \"abc12345\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const data = pm.response.json();",
+                  "    pm.collectionVariables.set(\"token\", data.token);",
+                  "    console.log(\"Saved token for \" + data.user.email + \" (role: \" + data.user.role + \") to the {{token}} collection variable.\");",
+                  "} else {",
+                  "    console.warn(\"Login did not return 200 - token was not updated.\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Drivers",
+      "description": "Driver profile management. All routes require a token.",
+      "item": [
+        {
+          "name": "Attach Driver Profile to Existing User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/drivers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers"
+              ]
+            },
+            "description": "Dispatcher only. Attaches a driver profile to a user that already exists with role \"driver\" but has no profile yet (e.g. data migrated from elsewhere) - this is NOT the normal signup path; a driver signing themselves up should use \"Register (Driver)\" instead, which creates both in one step. `userId` must reference an existing user whose role is already \"driver\". Returns 201 on success, 400 if userId is missing/invalid or that user is not role \"driver\", 403 if the caller is not a dispatcher, 409 if that user already has a profile.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": 7,\n  \"phone\": \"555-0000\",\n  \"vehicleType\": \"car\",\n  \"status\": \"offline\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Drivers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/drivers?status=online",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "online",
+                  "disabled": true,
+                  "description": "Optional filter: online | offline | busy"
+                }
+              ]
+            },
+            "description": "Dispatcher only. Lists active drivers (is_active=true) - deactivated drivers are omitted here but still resolvable via \"Get Driver\" by id. Enable the `status` query param above to filter by online/offline/busy. Returns 403 for non-dispatchers."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Driver",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/drivers/{{driverId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers",
+                "{{driverId}}"
+              ]
+            },
+            "description": "Accessible by a dispatcher, or by the driver viewing their own record (req.user.userId must match the driver's user_id). Not filtered by is_active - a deactivated driver is still resolvable by id. Returns 404 if no such driver exists at all, 403 if it exists but is not the caller's own record and the caller is not a dispatcher."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Driver's Last Known Location",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/drivers/{{driverId}}/location",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers",
+                "{{driverId}}",
+                "location"
+              ]
+            },
+            "description": "REST fallback for a page load before any real-time Socket.IO update has arrived (see SOCKETS.md for the live path: location:update -> order:tracking / active:drivers). Accessible by a dispatcher, the driver themselves, or a customer who currently has an active order (status assigned/picked_up/in_transit) assigned to that driver. Returns 404 if the driver does not exist, or exists but has never sent a location update; 403 if the caller has no relationship with this driver."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Driver's Own Status",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/drivers/{{driverId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers",
+                "{{driverId}}"
+              ]
+            },
+            "description": "A dispatcher may update name, phone, vehicleType, and status on any driver. A driver updating their own record (req.user.userId must match the driver's user_id) may update phone, vehicleType, and status only - not name; sending a disallowed field returns 400. Returns 404 if no such driver, 403 if not a dispatcher and not this driver's own record, 409 if the driver is inactive (soft-deleted).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"online\",\n  \"phone\": \"555-1111\",\n  \"vehicleType\": \"bike\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Deactivate Driver (Soft Delete)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/drivers/{{driverId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers",
+                "{{driverId}}"
+              ]
+            },
+            "description": "Dispatcher only. Sets is_active=false and status=offline rather than removing the row, since orders reference drivers historically (deleting the row would erase who actually delivered a past order). Idempotent - calling this again on an already-inactive driver just confirms the state, it does not error. Returns 404 if no such driver, 403 if the caller is not a dispatcher."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Orders",
+      "description": "Order lifecycle management. All routes require a token; what you can see/do is scoped by your role.",
+      "item": [
+        {
+          "name": "Create Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders"
+              ]
+            },
+            "description": "Customer only. `customerId` comes from the caller's token, not the body, so a customer can only ever create orders for themselves. Starts at status \"created\" with no driver assigned. `pickupAddress`, `dropoffAddress`, and `packageDescription` are required; lat/lng pairs and packageWeightKg are optional (if you give a latitude you must give the matching longitude too). Returns 201 on success, 400 for missing/invalid fields, 403 if the caller is not a customer.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickupAddress\": \"1 Main St, Springfield\",\n  \"pickupLatitude\": 39.78,\n  \"pickupLongitude\": -89.65,\n  \"dropoffAddress\": \"42 Side St, Springfield\",\n  \"dropoffLatitude\": 39.8,\n  \"dropoffLongitude\": -89.6,\n  \"packageDescription\": \"Small box of electronics\",\n  \"packageWeightKg\": 2.5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Orders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orders?status=created",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "created",
+                  "disabled": true,
+                  "description": "Optional filter: created | assigned | picked_up | in_transit | delivered"
+                }
+              ]
+            },
+            "description": "Scoped automatically by the caller's role: customers see only their own orders, drivers see only orders currently assigned to them, dispatchers see everything. Enable the `status` query param above to filter further on top of that scoping."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Order",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "description": "Accessible by the owning customer, the currently-assigned driver, or any dispatcher. Returns 404 if no such order exists at all (so existence is not leaked to someone with no connection to it), 403 if it exists but the caller has no relationship to it."
+          },
+          "response": []
+        },
+        {
+          "name": "Assign Driver to Order",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "description": "Dispatcher only - the created -> assigned transition. Requires `driverId` in the body, referencing an existing, active (not soft-deleted) driver. Even the order's own customer gets 403 here; only a dispatcher can make this specific transition. Pushes a real-time `notification` Socket.IO event to the customer and to the newly-assigned driver (if connected) - see SOCKETS.md. Returns 400 for an invalid/missing/inactive driverId or an out-of-order transition, 404 if no such order.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"assigned\",\n  \"driverId\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Mark Order Picked Up",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "description": "The assigned -> picked_up transition. Restricted to whichever driver is actually assigned to this order (resolved from the caller's own token) - not even a dispatcher can make this transition. Pushes a `notification` to the customer. Returns 403 if the caller is not that specific driver, 400 if the order is not currently in \"assigned\" status.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"picked_up\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Mark Order In Transit",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "description": "The picked_up -> in_transit transition. Same restriction as \"Mark Order Picked Up\" - only the assigned driver. No notification is pushed for this specific transition (only assigned/picked_up/delivered are in the assessment's notification list) - live position updates during transit come from the separate Socket.IO location:update flow instead, not this REST call.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"in_transit\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Mark Order Delivered",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "description": "The in_transit -> delivered transition (terminal - no further transitions are possible after this). Same restriction - only the assigned driver. Pushes a `notification` to both the customer and to the dispatchers room.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"delivered\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Order",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "description": "Dispatcher only, and only while status is still \"created\" - once a driver has been assigned or the order has progressed further, it must be carried through its lifecycle rather than deleted, since deleting it would erase a delivery already in flight. Returns 204 on success, 409 if the order has already progressed past \"created\", 404 if no such order, 403 if the caller is not a dispatcher. Try this against a freshly-created order (before assigning a driver) to see it succeed."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "description": "Service health check - no authentication required.",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Confirms the server process, the Postgres connection, and the Redis connection are all up. Public - no token required. Returns 200 with `db`/`redis` both \"connected\" when everything is healthy, or 503 with whichever of `db`/`redis` is \"disconnected\" (plus an error message) otherwise. Useful as a first sanity check before running anything else in this collection.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Logout",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/auth/logout",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "auth",
+            "logout"
+          ]
+        },
+        "description": "Revokes the current token via a Redis blocklist - not a no-op. The same token cannot be used again even though it has not naturally expired yet (the blocklist entry's TTL matches the token's own remaining lifetime). Requires a valid token (any role). If Redis is unreachable this returns a 500 rather than falsely claiming success - it never lies about having revoked something it could not actually revoke.\n\nPositioned last in this whole collection on purpose, not under Auth with Login: it revokes {{token}}, so if it ran earlier, every request after it in a top-to-bottom \"Run Collection\" pass would get 401'd by this collection's own ordering, not by anything wrong with the API. Run it on its own (or re-run Login afterward) if you want to keep testing once you have."
+      },
+      "response": []
+    }
+  ]
+}
