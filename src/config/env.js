@@ -8,6 +8,14 @@ module.exports = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: parseInt(process.env.PORT, 10) || 3000,
   db: {
+    // Same pattern as Redis below: Railway/Neon only ever provide a single
+    // DATABASE_URL connection string, not separate PG* vars - prefer it when
+    // present. Neon requires SSL; rejectUnauthorized: false because Neon's
+    // cert chain isn't in Node's default trusted CA bundle. Falls back to
+    // PGHOST/PGPORT/etc (or the docker-compose defaults) for local dev,
+    // which never sets DATABASE_URL.
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
     host: process.env.PGHOST || 'localhost',
     port: parseInt(process.env.PGPORT, 10) || 5432,
     database: process.env.PGDATABASE || 'delivery_tracking',
