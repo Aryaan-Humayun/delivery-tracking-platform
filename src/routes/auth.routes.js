@@ -14,6 +14,8 @@ const router = express.Router();
  *     description: >
  *       Creates a user account. If role is "driver", also creates a linked driver profile
  *       (status defaults to "offline") in the same DB transaction - both succeed or neither does.
+ *       Customers are active immediately; drivers start with account status "pending" and cannot
+ *       log in until a dispatcher approves them via PUT /dispatcher/drivers/{id}/approve.
  *       Subject to a stricter rate limit than other routes (5 per 15 minutes by default) to slow
  *       down spam registrations.
  *     tags: [Auth]
@@ -33,7 +35,7 @@ const router = express.Router();
  *                 format: password
  *                 description: At least 8 characters, with at least one letter and one number.
  *                 example: abc12345
- *               role: { type: string, enum: [customer, driver, dispatcher], example: customer }
+ *               role: { type: string, enum: [customer, driver], description: Dispatchers are not self-registered - see scripts/seed-dispatcher.js., example: customer }
  *               phone: { type: string, description: Required when role is "driver". , example: '555-1234' }
  *               vehicleType: { type: string, description: Required when role is "driver"., example: bike }
  *           examples:
@@ -109,6 +111,11 @@ router.post('/register', authLimiter, asyncHandler(register));
  *             schema: { $ref: '#/components/schemas/Error' }
  *       401:
  *         description: Invalid email or password (same message either way, to avoid leaking which one was wrong).
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/Error' }
+ *       403:
+ *         description: Credentials are correct, but the account is "pending" (driver awaiting dispatcher approval) or "suspended".
  *         content:
  *           application/json:
  *             schema: { $ref: '#/components/schemas/Error' }

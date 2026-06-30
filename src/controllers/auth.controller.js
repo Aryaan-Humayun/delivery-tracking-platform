@@ -8,7 +8,8 @@ const userModel = require('../models/user.model');
 const driverModel = require('../models/driver.model');
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const VALID_ROLES = ['customer', 'driver', 'dispatcher'];
+// Dispatchers are never self-registered - see scripts/seed-dispatcher.js.
+const VALID_ROLES = ['customer', 'driver'];
 
 function isValidEmail(email) {
   return typeof email === 'string' && EMAIL_REGEX.test(email);
@@ -24,7 +25,14 @@ function isValidPassword(password) {
 }
 
 function toPublicUser(user) {
-  return { id: user.id, name: user.name, email: user.email, role: user.role, createdAt: user.created_at };
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    status: user.status,
+    createdAt: user.created_at,
+  };
 }
 
 function toPublicDriver(driver) {
@@ -65,7 +73,10 @@ async function register(req, res, next) {
     // Rely on the users.email UNIQUE constraint rather than a pre-check SELECT,
     // so a race between two concurrent registrations with the same email can't
     // both pass a check and then both insert.
-    const user = await userModel.createUser({ name: name.trim(), email, passwordHash, role }, client);
+    // Customers can use their account immediately; drivers need a dispatcher
+    // to approve them first (see PUT /dispatcher/drivers/:id/approve).
+    const status = role === 'driver' ? 'pending' : 'active';
+    const user = await userModel.createUser({ name: name.trim(), email, passwordHash, role, status }, client);
 
     let driver = null;
     if (role === 'driver') {
@@ -107,6 +118,16 @@ async function login(req, res, next) {
       return res.status(401).json({ error: 'invalid email or password' });
     }
 
+    // Checked after the password match (not before) so a wrong password on a
+    // pending/suspended account still gets the generic 401 above, not a 403
+    // that would confirm the email is registered.
+    if (user.status === 'pending') {
+      return res.status(403).json({ error: 'Your account is pending approval by a dispatcher' });
+    }
+    if (user.status === 'suspended') {
+      return res.status(403).json({ error: 'Your account has been suspended' });
+    }
+
     const jti = crypto.randomUUID();
     const token = jwt.sign({ userId: user.id, role: user.role, jti }, config.jwt.secret, {
       expiresIn: config.jwt.expiresIn,
@@ -141,4 +162,4 @@ async function logout(req, res, next) {
   }
 }
 
-module.exports = { register, login, logout };
+module.exports = { register, login, logout, toPublicUser };

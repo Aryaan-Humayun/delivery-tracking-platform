@@ -233,6 +233,9 @@ async function updateOrderStatus(req, res, next) {
     if (!driver.is_active) {
       return res.status(400).json({ error: 'cannot assign an inactive driver' });
     }
+    if (driver.account_status !== 'active') {
+      return res.status(400).json({ error: 'cannot assign a driver whose account is not active' });
+    }
 
     const updated = await orderModel.updateStatus(orderId, { status: nextStatus, driverId: parsedDriverId });
     sendOrderNotifications(req, orderId, nextStatus, parsedDriverId);
