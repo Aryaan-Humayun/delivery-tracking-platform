@@ -22,9 +22,8 @@ const registerLocationHandlers = require('./handlers/location');
 // repeating them, which is the pattern the adapter's own docs use.
 async function attachRedisAdapter(io) {
   const pubClient = createClient({
+    url: config.redis.url,
     socket: {
-      host: config.redis.host,
-      port: config.redis.port,
       connectTimeout: 5000,
       // node-redis retries forever with backoff by default, which means a
       // failed connect() never rejects - it just hangs waiting to eventually

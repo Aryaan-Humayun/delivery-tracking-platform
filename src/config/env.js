@@ -15,8 +15,11 @@ module.exports = {
     password: process.env.PGPASSWORD || 'postgres',
   },
   redis: {
-    host: process.env.REDIS_HOST || 'localhost',
-    port: parseInt(process.env.REDIS_PORT, 10) || 6379,
+    // Railway (and most managed Redis hosts) only ever provide a single
+    // REDIS_URL connection string, not separate host/port vars - prefer it
+    // when present. Falls back to REDIS_HOST/REDIS_PORT (or localhost:6379)
+    // for local dev via docker-compose, which never sets REDIS_URL.
+    url: process.env.REDIS_URL || `redis://${process.env.REDIS_HOST || 'localhost'}:${parseInt(process.env.REDIS_PORT, 10) || 6379}`,
   },
   jwt: {
     secret: process.env.JWT_SECRET,

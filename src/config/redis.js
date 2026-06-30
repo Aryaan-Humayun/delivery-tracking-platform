@@ -2,9 +2,8 @@ const { createClient } = require('redis');
 const config = require('./env');
 
 const redisClient = createClient({
+  url: config.redis.url,
   socket: {
-    host: config.redis.host,
-    port: config.redis.port,
     // node-redis retries forever with backoff by default, which means a
     // failed connect() never rejects - it just hangs waiting to eventually
     // succeed. That hangs the whole server at startup (see server.js) and,
